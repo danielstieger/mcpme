@@ -1,0 +1,105 @@
+plugins {
+    id 'war'
+}
+
+group = 'org.modellwerkstatt'
+
+repositories {
+    mavenCentral()
+}
+
+// Gebaut wird mit dem JDK aus JAVA_HOME (hier das JBR 25); Ziel ist Java 21,
+// weil die MoWare-Runtime für 21 übersetzt ist und Tomcat mit Java 21 läuft.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+// Bibliotheken, die erst das WAR einer Anwendung mitbringt (wie beim Zusammenbau einer turkuforms-Anwendung)
+configurations {
+    appLibs
+}
+
+def mowareLangs = "${mowarePluginHome}/languages/MoWareLangAndSolutions"
+def mowareBasis = "${mowarePluginHome}/jars/basis"
+def mowareRuntime = files(
+        "${mowareLangs}/org.modellwerkstatt.manmap.runtime.jar",
+        "${mowareLangs}/org.modellwerkstatt.objectflow.runtime.jar",
+        "${mowareLangs}/org.modellwerkstatt.dataux.runtime.jar")
+
+// Wie in turkuforms: Vor dem Übersetzen packt das ant-Skript der Plattform die Jars der Runtime aus den
+// übersetzten Klassen in moware neu ins Plugin (mowarePluginAdoption). Dabei leert es dessen jars-Ordner;
+// mowareUpdatePluginForTukru legt turkuforms.war wieder hinein.
+ant.importBuild "${mowareHome}/objectflow/assembly/bmoware.xml"
+
+tasks.named('mowareUpdatePluginForTukru') { mustRunAfter 'mowarePluginAdoption' }
+compileJava {
+    dependsOn 'mowarePluginAdoption', 'mowareUpdatePluginForTukru'
+}
+
+dependencies {
+    // MCP: offizielles Java-SDK
+    implementation platform("io.modelcontextprotocol.sdk:mcp-bom:${mcpSdkVersion}")
+    implementation "io.modelcontextprotocol.sdk:mcp"
+
+    // Prüfung der Zugriffstoken (JWT, Schlüssel des Ausstellers)
+    implementation "com.nimbusds:nimbus-jose-jwt:9.40"
+
+    // Tomcat 11 liefert die Servlet-API selbst
+    compileOnly "jakarta.servlet:jakarta.servlet-api:6.1.0"
+
+    // MoWare-Runtime und Basis: nur zum Übersetzen, im mcpme.war nicht enthalten
+    compileOnly mowareRuntime
+    compileOnly files(
+            "${mowareBasis}/spring-core-5.3.27.jar",
+            "${mowareBasis}/spring-beans-5.3.27.jar",
+            "${mowareBasis}/spring-context-5.3.27.jar",
+            "${mowareBasis}/joda-time-2.12.5.jar")
+
+    appLibs mowareRuntime
+    appLibs fileTree(dir: mowareBasis, include: '*.jar', excludes: ['slf4j-api*.jar'])
+    appLibs fileTree(dir: "${mpsHome}/lib", includes: ['mps-collections.jar', 'mps-closures.jar', 'mps-references.jar'])
+    appLibs fileTree(dir: "${mowarePluginHome}/jars/addons", include: 'mysql*.jar')
+    // PDF-Erzeugung der Runtime (FOP)
+    appLibs fileTree(dir: "${mowarePluginHome}/jars/printing21", include: '*.jar')
+}
+
+// mcpme.war: der Server ohne Anwendung, Grundlage für das WAR jeder Anwendung
+war {
+    archiveFileName = "mcpme.war"
+}
+
+// ---- Testanwendung simpleone -------------------------------------------------------------------
+// Baut ein vollständiges WAR: mcpme + Runtime + generierte Klassen von simpleone.
+// Die Spring-Konfiguration kommt aus dem Modell von simpleone (OFXConfig "McpConfig").
+
+def simpleoneBuild = layout.buildDirectory.dir('simpleone')
+
+tasks.register('simpleoneWebXml', Copy) {
+    from 'src/main/webapp/WEB-INF/web.xml'
+    into simpleoneBuild
+    // Die Werte gehören zu den Eingaben, sonst bemerkt Gradle einen Wechsel der Konfiguration nicht.
+    inputs.property('config', simpleoneConfig)
+    inputs.property('appClass', simpleoneAppClass)
+    filter { String line ->
+        line.replace('APPLICATION_CONFIG', simpleoneConfig).replace('APPLICATION_FQNAME', simpleoneAppClass)
+    }
+}
+
+tasks.register('simpleoneWar', War) {
+    dependsOn 'classes', 'simpleoneWebXml'
+    archiveFileName = 'simpleone.war'
+    destinationDirectory = layout.buildDirectory.dir('apps')
+    classpath = sourceSets.main.runtimeClasspath + configurations.appLibs + files(simpleoneClasses)
+    webXml = simpleoneBuild.map { it.file('web.xml') }.get().asFile
+    // src/main/webapp kommt über das War-Plugin von selbst dazu; dessen web.xml ist nur die Vorlage.
+    def template = file('src/main/webapp/WEB-INF/web.xml')
+    eachFile { if (it.file == template) { it.exclude() } }
+}
+
+// WAR der Testanwendung in den lokalen Tomcat 11 kopieren (tomcatHome in gradle.properties).
+// Endpunkt danach: http://localhost:8180/simpleone/mcp
+tasks.register('deploy', Copy) {
+    from tasks.named('simpleoneWar')
+    into "${tomcatHome}/webapps"
+}

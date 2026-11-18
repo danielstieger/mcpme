@@ -1,0 +1,6 @@
+build/
+.gradle/
+mcp.hdr
+mcp.init
+mcp.sid
+.idea/

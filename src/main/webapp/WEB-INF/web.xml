@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Vorlage wie bei turkuforms: Beim Zusammenbau des WAR einer Anwendung werden APPLICATION_CONFIG und
+  APPLICATION_FQNAME ersetzt. Bleiben die Platzhalter stehen, startet der Server ohne Anwendung.
+-->
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_1.xsd"
+         version="6.1">
+
+    <description>MoWare MCP server (mcpme) APPLICATION_FQNAME</description>
+    <display-name>mcpme APPLICATION_FQNAME</display-name>
+
+    <servlet>
+        <servlet-name>mcpme</servlet-name>
+        <servlet-class>org.modellwerkstatt.mcpme.McpmeServlet</servlet-class>
+        <init-param>
+            <param-name>xmlConfigFile</param-name>
+            <param-value>APPLICATION_CONFIG</param-value>
+        </init-param>
+        <init-param>
+            <param-name>applicationFqName</param-name>
+            <param-value>APPLICATION_FQNAME</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+        <!-- Der MCP-Transport hält Antworten als Stream offen. -->
+        <async-supported>true</async-supported>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>mcpme</servlet-name>
+        <url-pattern>/mcp</url-pattern>
+        <!-- Angaben zur Anmeldung für Clients (RFC 9728) -->
+        <url-pattern>/.well-known/*</url-pattern>
+        <!-- Vermittelte Anmeldung (Einstellung OAuthRelay) -->
+        <url-pattern>/oauth/*</url-pattern>
+    </servlet-mapping>
+
+</web-app>
